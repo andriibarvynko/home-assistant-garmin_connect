@@ -158,6 +158,16 @@ async def async_setup_entry(
         "add_blood_pressure",
     )
 
+    platform.async_register_entity_service(
+        "add_hydration",
+        {
+            vol.Required(ATTR_ENTITY_ID): str,
+            vol.Required("value_in_ml"): vol.Coerce(int),
+            vol.Optional("timestamp"): str,
+        },
+        "add_hydration",
+    )
+
 
 class GarminConnectSensor(CoordinatorEntity, SensorEntity):
     """Representation of a Garmin Connect Sensor."""
@@ -393,6 +403,67 @@ class GarminConnectSensor(CoordinatorEntity, SensorEntity):
             timestamp,
             notes,
         )
+
+    async def add_hydration(self, **kwargs):
+        """
+        Add a hydration (water intake) record to Garmin Connect.
+
+        Parameters:
+            value_in_ml: Amount of water intake in milliliters.
+            timestamp: Optional timestamp for the intake, defaults to now.
+
+        Raises:
+            IntegrationError: If unable to log in or hydration updates are unsupported.
+        """
+        value_in_ml = kwargs.get("value_in_ml")
+        timestamp = kwargs.get("timestamp")
+
+        if not await self.coordinator.async_login():
+            raise IntegrationError(
+                "Failed to login to Garmin Connect, unable to update"
+            )
+
+        if timestamp:
+            try:
+                intake_time = datetime.datetime.fromisoformat(timestamp)
+            except ValueError as err:
+                raise IntegrationError(
+                    "Invalid timestamp format for hydration update"
+                ) from err
+        else:
+            intake_time = datetime.datetime.now(
+                ZoneInfo(self.coordinator.time_zone)
+            )
+
+        cdate = intake_time.date().isoformat()
+        normalized_timestamp = intake_time.isoformat(timespec="seconds")
+
+        api = self.coordinator.api
+        if hasattr(api, "add_hydration_data"):
+            await self.hass.async_add_executor_job(
+                api.add_hydration_data,
+                value_in_ml,
+                cdate,
+                normalized_timestamp,
+            )
+        elif hasattr(api, "add_hydration"):
+            await self.hass.async_add_executor_job(
+                api.add_hydration,
+                value_in_ml,
+                cdate,
+                normalized_timestamp,
+            )
+        elif hasattr(api, "add_water_intake"):
+            await self.hass.async_add_executor_job(
+                api.add_water_intake,
+                value_in_ml,
+                cdate,
+                normalized_timestamp,
+            )
+        else:
+            raise IntegrationError(
+                "Installed garminconnect library does not support hydration updates"
+            )
 
 
 class GarminConnectGearSensor(CoordinatorEntity, SensorEntity):

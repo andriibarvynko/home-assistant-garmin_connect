@@ -152,3 +152,25 @@ add_blood_pressure:
       name: Notes
       description: Add notes to the measurement
       example: 'Measured with Beurer BC54'
+
+add_hydration:
+  name: Adds hydration intake
+  description: Adds water intake to Garmin Connect hydration.
+  fields:
+    entity_id:
+      name: entity
+      description: entity
+      required: true
+      selector:
+        entity:
+          integration: garmin_connect
+    value_in_ml:
+      required: true
+      name: Water intake (ml)
+      description: Amount of water intake in milliliters
+      example: 250
+    timestamp:
+      required: false
+      name: Timestamp
+      description: Datetime string of when the water was consumed. Defaults to now.
+      example: 2023-12-30T07:34:00
