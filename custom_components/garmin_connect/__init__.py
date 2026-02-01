@@ -30,7 +30,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "binary_sensor"]
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -265,6 +265,9 @@ class GarminConnectDataUpdateCoordinator(DataUpdateCoordinator):
         sleep_data = {}
         sleep_score = None
         sleep_time_seconds = None
+        sleep_start = None
+        sleep_end = None
+        sleeping_now = None
         hrv_data = {}
         hrv_status = {"status": "unknown"}
         endurance_data = {}
@@ -519,6 +522,41 @@ class GarminConnectDataUpdateCoordinator(DataUpdateCoordinator):
         except KeyError:
             _LOGGER.debug("No sleep time seconds data found")
 
+        # Sleep window data
+        try:
+            daily_sleep = sleep_data.get("dailySleepDTO", {})
+            sleep_start = _parse_sleep_timestamp(
+                daily_sleep.get("sleepStartTimestampGMT")
+                or daily_sleep.get("sleepStartTimestampLocal")
+                or daily_sleep.get("sleepStartTimestamp")
+                or daily_sleep.get("sleepStart"),
+                self.time_zone,
+            )
+            sleep_end = _parse_sleep_timestamp(
+                daily_sleep.get("sleepEndTimestampGMT")
+                or daily_sleep.get("sleepEndTimestampLocal")
+                or daily_sleep.get("sleepEndTimestamp")
+                or daily_sleep.get("sleepEnd"),
+                self.time_zone,
+            )
+
+            now = datetime.now(ZoneInfo(self.time_zone))
+            if sleep_start:
+                sleep_start = sleep_start.astimezone(ZoneInfo(self.time_zone))
+            if sleep_end:
+                sleep_end = sleep_end.astimezone(ZoneInfo(self.time_zone))
+
+            if sleep_start and sleep_end:
+                sleeping_now = sleep_start <= now <= sleep_end
+            elif sleep_start and not sleep_end:
+                sleeping_now = now >= sleep_start and now - sleep_start <= timedelta(
+                    hours=24
+                )
+            else:
+                sleeping_now = None
+        except (KeyError, TypeError, ValueError):
+            _LOGGER.debug("No sleep window data found")
+
         # HRV data
         try:
             if hrv_data and "hrvSummary" in hrv_data:
@@ -546,6 +584,9 @@ class GarminConnectDataUpdateCoordinator(DataUpdateCoordinator):
             "gearDefaults": gear_defaults,
             "sleepScore": sleep_score,
             "sleepTimeSeconds": sleep_time_seconds,
+            "sleepStart": sleep_start.isoformat() if sleep_start else None,
+            "sleepEnd": sleep_end.isoformat() if sleep_end else None,
+            "sleepingNow": sleeping_now,
             "hrvStatus": hrv_status,
             "enduranceScore": endurance_status,
             **fitnessage_data,
@@ -612,3 +653,27 @@ def calculate_next_active_alarms(alarms, time_zone):
             active_alarms.append(alarm.isoformat())
 
     return sorted(active_alarms) if active_alarms else None
+
+
+def _parse_sleep_timestamp(value, time_zone: str):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        ts = float(value)
+        if ts > 1_000_000_000_000:
+            ts = ts / 1000
+        return datetime.fromtimestamp(ts, tz=ZoneInfo("UTC"))
+    if isinstance(value, str):
+        v = value.strip()
+        if v.isdigit():
+            return _parse_sleep_timestamp(int(v), time_zone)
+        if v.endswith("Z"):
+            v = v[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(v)
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=ZoneInfo(time_zone))
+        return dt
+    return None
