@@ -195,6 +195,17 @@ data:
 ```
 See the action template for other available values to add
 
+#### Add Hydration (Water Intake)
+
+```
+action: garmin_connect.add_hydration
+data:
+  entity_id: sensor.hydration
+  value_in_ml: 250
+  timestamp: "{{ as_timestamp(now())  | timestamp_local}}"
+```
+NOTE: You need to enable the Hydration entity
+
 NOTE: You need to enable the Weight entity
 
 Full example:
