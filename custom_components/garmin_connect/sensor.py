@@ -439,27 +439,31 @@ class GarminConnectSensor(CoordinatorEntity, SensorEntity):
         normalized_timestamp = intake_time.isoformat(timespec="seconds")
 
         api = self.coordinator.api
+
+        async def _call_hydration(method):
+            last_err = None
+            for args in (
+                (cdate, value_in_ml, normalized_timestamp),
+                (value_in_ml, cdate, normalized_timestamp),
+                (cdate, value_in_ml),
+                (value_in_ml, cdate),
+            ):
+                try:
+                    await self.hass.async_add_executor_job(method, *args)
+                    return
+                except (TypeError, ValueError) as err:
+                    last_err = err
+                    continue
+            raise IntegrationError(
+                "Hydration update failed with installed garminconnect API"
+            ) from last_err
+
         if hasattr(api, "add_hydration_data"):
-            await self.hass.async_add_executor_job(
-                api.add_hydration_data,
-                value_in_ml,
-                cdate,
-                normalized_timestamp,
-            )
+            await _call_hydration(api.add_hydration_data)
         elif hasattr(api, "add_hydration"):
-            await self.hass.async_add_executor_job(
-                api.add_hydration,
-                value_in_ml,
-                cdate,
-                normalized_timestamp,
-            )
+            await _call_hydration(api.add_hydration)
         elif hasattr(api, "add_water_intake"):
-            await self.hass.async_add_executor_job(
-                api.add_water_intake,
-                value_in_ml,
-                cdate,
-                normalized_timestamp,
-            )
+            await _call_hydration(api.add_water_intake)
         else:
             raise IntegrationError(
                 "Installed garminconnect library does not support hydration updates"
